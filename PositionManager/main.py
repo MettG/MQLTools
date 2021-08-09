@@ -12,21 +12,28 @@ print(mt5.terminal_info())
 print(mt5.version())
 online = True
 # ======================
-# Start Management Loop
+# Management Loop
 # ======================
 
 def do_work():
     print(f"Checking positions: {mt5.positions_total}")
-    pos = gather_positions()
+    
 
 # ========================
 # Check and manage all open Positions
 # ========================
 
-positions = mt5.positions_get()
-if positions==None:
-    # Give all the formatted positions to the manager
-    m = Manager(get_positions)
+def manage_open_positions():
+    positions = mt5.positions_get()
+    if positions==None:
+        # Give all the formatted positions to the manager
+        m = Manager(get_positions)
 
-while online:
-    do_work()
+def main():
+    print("MT5 Position Manger Booting...")
+    
+    while online:
+        do_work()
+
+if __name__ == '__main__':
+    main()
