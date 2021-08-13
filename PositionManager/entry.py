@@ -14,3 +14,23 @@
             Run if take hit and until ttc cross over
 
 """
+
+class Entry:
+    def __init__(self, symbol, direction, risk, type_of_trade='trend'):
+        self.symbol = symbol
+        self.direction = direction
+        self.risk = risk
+        self.type = type_of_trade
+
+    def get_margin(self):
+        """
+            Reach out via Connection class to get current available margin 
+        """
+        if len(self.symbol) == 6: # Assumes currency pair
+            # Reach out to meta trader
+            # c = Connection(,)
+        else:
+            # Assumes tradovate, connect via api
+            return
+
+        

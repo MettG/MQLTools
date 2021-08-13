@@ -1,4 +1,4 @@
-import pandas as pd
+from PositionManager.utils import *
 
 class TrueTrendChannel:
     def __init__(self, period, timeframe):
@@ -51,14 +51,6 @@ class TrueTrendChannel:
                 # If first swing found, use to fill the rest of the swing indexes
                 if len(self.swings) == 0:
                     
-
-
-
-
-
-            
-
-
 
 
     # Check if swing low or not

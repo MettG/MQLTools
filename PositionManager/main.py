@@ -1,6 +1,8 @@
 import pandas as pd
 import MetaTrader5 as mt5
+from multiprocessing import Process
 from PositionManager.position import get_positions
+from PositionManager.command import *
 
 if not mt5.initialize():
     print("init failed.")
@@ -35,30 +37,37 @@ def do_work(manager):
 # ====================
 # Init settings
 # ===================
-
-print("--INIT SETTINGS--")
-print("Press enter to pass init.")
-TimeFrame = 60
-MeanPeriod = 55
-TrailDist = 1.5 # ATR
-StopDist = 1.5
-TakeDist = 1
-EarlyBreak = True
-# display init settings
-print(
-    f"""
-    Time Frame : {TimeFrame}
-    Mean (EMA) Period : {MeanPeriod}
-    ....Exits are in mults of ATR....
-    Trail Distance: {TrailDist}
-    Stop Distance: {StopDist}
-    Take Distance: {TakeDist}
-    Move Position to break even if in profit and early exit detected? {EarlyBreak}
-    """
-)
-if input("[setting name] (new val)").strip != "":
-    print("Init settings would be updated here.")
-
+def init_settings():
+    print("--INIT SETTINGS--")
+    print("Press enter to pass init.")
+    TimeFrame = 60
+    MeanPeriod = 55
+    TrailDist = 1.5 # ATR
+    StopDist = 1.5
+    TakeDist = 1
+    EarlyBreak = True
+    # display init settings
+    print(
+        f"""
+        Time Frame : {TimeFrame}
+        Mean (EMA) Period : {MeanPeriod}
+        ....Exits are in mults of ATR....
+        Trail Distance: {TrailDist}
+        Stop Distance: {StopDist}
+        Take Distance: {TakeDist}
+        Move Position to break even if in profit and early exit detected? {EarlyBreak}
+        """
+    )
+    if input("[setting name] (new val)").strip != "":
+        print("Init settings would be updated here.")
+    return {
+        'timeframe':TimeFrame,
+        'meanPeriod':MeanPeriod,
+        'trailDist':TrailDist,
+        'stopDist':StopDist,
+        'takeDist':TakeDist,
+        'EarlyBreak':EarlyBreak
+    }
 
 # ========================
 # Check and manage all open Positions
@@ -70,11 +79,18 @@ def manage_open_positions():
         # Give all the formatted positions to the manager
         m = Manager(get_positions)
 
-def main():
+def main_management():
     print("MT5 Position Manger Booting...")
-    
     while online:
         do_work()
+def main_command():
+    settings = init_settings()
+    while online:
+        print("Ready for command | 'help' for list of commands\r\n")
+        val = input("==>  ")
+        Command(settings, val)
 
 if __name__ == '__main__':
-    main()
+    pM = Process(target=main_management, name='Open Position Management')
+    pC = Process(target=main_command, name='Command Listener')
+
