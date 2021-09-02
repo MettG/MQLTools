@@ -7,6 +7,7 @@ class Position:
         self.volume = volume
         self.open = open
         self.stop = stop
+        self.init_stop = stop # Special stop that signifies the furthest a stop can be moved
         self.virtualStop = stop # Unused feature
         self.take = take
         self.virtualTake = take # Unused feature
@@ -14,6 +15,13 @@ class Position:
         self.profit = profit
         self.symbol = symbol
         self.info = None # Unused feature, for saving information about a position
+    
+    def update(self):
+        # Send a request to mt5 to update the order with this positions ticket, with this positions variables
+        pass
+    def close(self):
+        # Send a request to mt5 to close the position with this ticket
+        pass
 
 def get_positions(raws):
     """
