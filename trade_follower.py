@@ -27,13 +27,17 @@ class Command:
 def com_function(conn):
     com_raw = pyautogui.prompt('Enter Command')  # returns string or None
     print(com_raw)
-    conn.send([com_raw])
+    conn.send(com_raw)
 
 if __name__ == "__main__":
     print(f"Begin Trade Follower \r\n{VERSION}")
     par_con, chi_con = Pipe()
 
-    com_process = Process(target=com_function, args=(chi_con))
+    com_process = Process(target=com_function, args=[chi_con])
     com_process.start()
+    com_process.join()
+
+    print(par_con.recv())
+
 
     
