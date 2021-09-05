@@ -1,7 +1,5 @@
-dict = {
-    'bitch':1,
-    'pig':2
-}
+s = "USDJPY"
+l = "LTCUSD"
 
-print('fag' in dict)
-print('bitch' in dict)
+d = (s,l)
+print(d.s)

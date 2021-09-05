@@ -106,11 +106,6 @@ class Manager:
 
 
 
-                
-        
-        
-        
-
 if __name__ == "__main__":
     # Script is running in standalone, meaning that only the manager is running
     if not mt5.initialize():
