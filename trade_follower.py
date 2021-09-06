@@ -43,6 +43,9 @@ def get_format_ohlc(symbol, timeframe, n, curr_time):
     # data['time'] = pd.to_datetime(data['time'], unit='s')
     return columns, np.flip(data_raw)
 
+# Holds all the data necessary for open positions
+data_keepers = {}
+
 class DataKeep:
     """
         Hold a deque of bars, update as necessary
@@ -62,19 +65,25 @@ class DataKeep:
         else:
             print(f"No new data to update {self.timeframe}. ", end="")
 
+def data_ready(curr_time, symbols):
+
+    for key in data_keepers:
+        if key not in symbols:
+            data_keepers.pop(key)
 
 
+    for s in symbols:
+        if not data_keepers.has_key(s):
+            data_keepers[s] = [ DataKeep(s, mt5.TIMEFRAME_H1, 21, curr_time), DataKeep(s, mt5.TIMEFRAME_M6, 56, curr_time) ]
+        else:
+            [x.update(curr_time) for x in data_keepers[s]]
 
-def data_ready(curr_time):
+
     # Given the current time, determine if there is a new bar yet
     hr_rate = mt5.copy_rates_from_pos("GBPUSD", mt5.TIMEFRAME_H1, 0, 1)
     m6_rate = mt5.copy_rates_from_pos("GBPUSD", mt5.TIMEFRAME_M6, 0, 1)
     # print(hr_rate, m6_rate, mt5.last_error())
     print(DataKeep("GBPUSD", mt5.TIMEFRAME_H1, 21, curr_time).ohlc)
-
-
-
-
 
 
 # ===============
