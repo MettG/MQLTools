@@ -1,7 +1,11 @@
-d = {'fuck':2,
-    'shit':3,
-    'bitch':4,
-    'b':1223
-}
+import pandas as pd
+c = ('fuck', 'shit', 'bitch', 'fu')
+v = [
+    (1,5,1,5),
+    (2,2,2),
+    (3,3,3)
+]
 
-for key in d: print(key)
+d = pd.DataFrame(v, columns=c)
+
+print(d['fu'])
