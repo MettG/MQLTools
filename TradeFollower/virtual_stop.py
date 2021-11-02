@@ -60,32 +60,6 @@ class VirtualManager:
                 if position == None or not position:
                     print(f"[VIRTUAL STOP] Position {stop} no longer exists.")
                     del stop
-
-class StaticVirtualManager:
-    
-    @staticmethod
-    def new(m, id, oType, symbol, price):
-
-        if m == None:
-            print("[STATIC VM] No manager, building one.")
-            m = VirtualManager()
-            m.add(id,oType,symbol,price)
-        else:
-            print("[STATIC VM] Adding new stop.")
-            m.add(id,oType,symbol,price)
-    @staticmethod
-    def update(m):
-        if m == None:
-            print("[STATIC VM] No manager exists.")
-        else:
-            print("[STATIC VM] Updating...")
-            m.update()
-
-def manage_virtual(manager, pos_id, pos_type, symbol, stop):
-    StaticVirtualManager.new(manager, pos_id,pos_type,symbol,stop)
-
-def update_virtual(manager):
-    StaticVirtualManager.update(manager)
                     
 
     

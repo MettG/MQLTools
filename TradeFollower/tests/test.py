@@ -1,10 +1,6 @@
-s = ["fag", "bitch", "nigger"]
+s = ["fag", "bitch", "nigger", "fuck", "yoya", "kroma go pan"]
+d = {}
+for x in s :
+    d[x] = 3
 
-print(s)
-
-arr = []
-for x in s:
-    arr.append(x+"yoya")
-
-s = arr
-print(s)
+print(list(d.keys()))

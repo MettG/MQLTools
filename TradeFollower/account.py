@@ -15,7 +15,7 @@ class Account:
         if not mt5.initialize():
             print("initialize() failed, error code =",mt5.last_error())
             quit()
-        authorized = mt5.login(self.number, password=self.password)
+        authorized = mt5.login(self.number, password=self.password, server=self.description)
         if not authorized:
             raise Exception(f"Login failed for account {self.number} error: {mt5.last_error()}")
         print(f"Login={authorized}")
@@ -27,8 +27,8 @@ class AccountManager:
     """
     def __init__(self):
         self.accounts = [
+            Account(29603,"pork5659", "TradersWay-Live"),
             Account(1088545,"pork5659", "TradersWay Demo 1"),
-            Account(29603,"pork5659", "TradersWay Live 1"),
         ]
         self.index = 0
         self.accounts[0].login()

@@ -9,6 +9,7 @@ from multiprocessing import Process, Pipe
 from collections import deque
 from enum import Enum
 from virtual_stop import manage_virtual, update_virtual, VirtualManager
+from zones import ZoneManager
 # from . import virtual_stop
 # always returns "OK"
 # pyautogui.confirm('Asks OK or Cancel')  # returns "OK" or "Cancel"
@@ -27,24 +28,27 @@ Add automatic position closing at 21:00 utc, and lock out new entries until 22
 # ================
 
 VERSION = """
-          V 0.02
+          V 0.03
           Places stop min of (highest/lowest +/- spread of last 8 or 1 * atr)
           Places take max of (highest/lowest of last 8 or 1 * atr) as default, further options soon to come
           Trails open orders by .25 * atr (1hr) above/below HMA 55
           close orders when ema over/under hma and close over/under hma (after profit has been hit previously in the last 8 bars)
+          New Emergency break even added if reversal bar for Trend orders
           """
 
 # Array of all symbols
 SYMBOLS = [
     "USDJPY","GBPJPY", "EURJPY",
     "GBPUSD", "EURUSD", "AUDUSD",
-    "USDCAD", "XAUUSD"
+    "USDCAD", "XAUUSD", "EURGBP"
 ]
 
 # Account Manager
 acc_manager = None
-
 manager = VirtualManager()
+
+# Manages the zones for entries
+zone_manager = ZoneManager()
 
 class PosType(Enum):
     TREND = 0
@@ -118,6 +122,7 @@ def calculate_atr(true_range,period):
 
 # Holds all the data necessary for open positions
 data_keepers = {}
+
 
 class ColumnQueue:
     """
@@ -252,6 +257,12 @@ class DataKeep:
         Return most recent ohlc
         """
         return self.ohlc.get_pd().iloc[0]
+    
+    def get_bars(self, n):
+        """
+        Returns the given number of recent ohlc bars
+        """
+        return self.ohlc.get_pd().iloc[:n]
 
     
 
@@ -263,7 +274,7 @@ def data_ready(curr_time, symbols):
 
         for s in symbols:
             if not s in data_keepers:
-                data_keepers[s] = [ DataKeep(s, mt5.TIMEFRAME_H1, 21, curr_time), DataKeep(s, mt5.TIMEFRAME_M6, 70, curr_time) ]
+                data_keepers[s] = [ DataKeep(s, mt5.TIMEFRAME_H1, 21, curr_time), DataKeep(s, mt5.TIMEFRAME_M15, 70, curr_time) ]
             else:
                 [x.update(curr_time) for x in data_keepers[s]]
     except:
@@ -389,6 +400,9 @@ def com_function(conn):
     conn.send(com_raw)
     time.sleep(1.5)
 
+
+# Add a parse for zone entry
+
 def handler(conn, acc_manager: AccountManager):
     while True:
         val = conn.recv()
@@ -430,7 +444,6 @@ def handler(conn, acc_manager: AccountManager):
                 else:
                     # assumes only description passed
                     acc_manager.switch(descrip=arr[0])
-
 
         if '-r' in val:
             # Adjust risk value by the superceding value
@@ -543,7 +556,7 @@ def update_mean_position(oType, symbol, tickets, vol, open, hma, std, last_bar):
             isUpdate = True
     if isUpdate: print("[POSITION] Mean reversion position updated.")
 
-def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std):
+def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std, last_bar):
     """
     Manage an open trend position,
     Trail price at band when on the positive side of the mean, else at .3 atr60 above/below band
@@ -577,11 +590,25 @@ def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std):
             isUpdate = True
         elif ask > hma:
             print("[POSITION] Trend Postion, price is on positive side of mean.")
+            stop_ok = True
             new_stop = hma - std
+            reason = "Trailing Profitable move."
             if new_stop < open + std or new_stop <= stop:
-                print("[POSITION] Trend Buy Position not far enough in profit for stop update.")
+                # Trail stop not applicable, test for break even if reversal bar
+                o = last_bar['open']
+                c = last_bar['close']
+                l = last_bar['low']
+                h = last_bar['high']
+                new_stop = open + .2 * atr60
+                if open - bid >= std and ( (o < c and o-l >= .4 * (h-l) and h - c < o - l) or (o > c and c - l >= .4 * (h-l) and h - o < c - l) ) and new_stop > stop:
+                    print("[POSITION] Trend Postion, reversal bar detected, break even triggered.")
+                    reason = "Emergency Break Even triggered."
+                else:
+                    stop_ok = False
+            if not stop_ok:
+                print("[POSITION] Trend Sell Position conditions not met for profit trail or emergency break even.")
                 return
-            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, f"{stop} -> {new_stop}")
+            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, reason, f"{stop} -> {new_stop}")
             manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,new_stop)
             if len(tickets) > 1:
                 manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
@@ -601,7 +628,7 @@ def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std):
         if bid <= hma - atr60 -std:
             # Price is far in profit
             print("[POSITION] Trend Position deep in profit.")
-            new_stop = ask + std
+            new_stop = ask + atr60
             if new_stop > open - std or new_stop >= stop:
                 print("[POSITION] Trend Sell Position not far enough in profit for stop update.")
                 return
@@ -619,11 +646,25 @@ def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std):
             isUpdate = True
         elif bid < hma:
             print("[POSITION] Trend Postion, price is on positive side of mean.")
+            stop_ok = True
             new_stop = hma + std
+            reason = "Trailing Profitable move."
             if new_stop > open - std or new_stop >= stop:
-                print("[POSITION] Trend Sell Position not far enough in profit for stop update.")
+                # Trail stop not applicable, test for break even if reversal bar
+                o = last_bar['open']
+                c = last_bar['close']
+                l = last_bar['low']
+                h = last_bar['high']
+                new_stop = open - .2 * atr60
+                if open - bid >= std and ( (o < c and h - c >= .4 * (h-l) and o - l < h - c) or (o > c and h - o >= .4 * (h-l) and c - l < h - o) ) and new_stop < stop:
+                    print("[POSITION] Trend Postion, reversal bar detected, break even triggered.")
+                    reason = "Emergency Break Even triggered."
+                else:
+                    stop_ok = False
+            if not stop_ok:
+                print("[POSITION] Trend Sell Position conditions not met for profit trail or emergency break even.")
                 return
-            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, f"{stop} -> {new_stop}")
+            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, reason, f"{stop} -> {new_stop}")
             manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,hma + std)
             if len(tickets) > 1:
                 manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, hma + std)
@@ -683,7 +724,7 @@ def update_runner_position(oType, symbol, ticket, vol, open, trail_dist, hma):
             else:
                 print("[POSITION] Sell runner closed.")
         else:
-            new_stop = hma -+trail_dist if hma + trail_dist < open - trail_dist else open - trail_dist
+            new_stop = hma +trail_dist if hma + trail_dist < open - trail_dist else open - trail_dist
             update_res = build_request(vol,symbol,0,new_stop,0.0,action=mt5.TRADE_ACTION_SLTP, position=ticket, comment="runner")
             if not update_res:
                 Log("[Critical] Error when updating runner", symbol, oType, price, f'mean:{hma}', f'newstop:{new_stop}')
@@ -735,7 +776,7 @@ if __name__ == "__main__":
 
     virtual_count = 0
     no_pos_count = 0
-
+    symbols_to_load = zone_manager.symbols()
     while handler_process.is_alive():
         
         if not com_process or not com_process.is_alive():
@@ -748,7 +789,7 @@ if __name__ == "__main__":
         positions = mt5.positions_get()
         if positions:
             pos_df = get_positions(positions)
-            pos_symbols = extract_symbols(pos_df)
+            symbols_to_load.append(extract_symbols(pos_df))
             virtual_count += 1
             time.sleep(1)
             if virtual_count % 30 == 0:
@@ -764,7 +805,7 @@ if __name__ == "__main__":
             continue
 
         # Check for readied data
-        data_ready(utc_from, pos_symbols)
+        data_ready(utc_from, symbols_to_load)
         # print("[DATA] Datakeepers ready.")
         for sym in data_keepers:
             """
@@ -848,7 +889,7 @@ if __name__ == "__main__":
             
             # Assume trend position, use trend following rules to update if its gotten this far
             
-            update_trend_position(oType, sym, tickets, sl.iloc[0], o.iloc[0], dk[0].atr, dk[1].hma, dk[1].std)
+            update_trend_position(oType, sym, tickets, sl.iloc[0], o.iloc[0], dk[0].atr, dk[1].hma, dk[1].std, dk[1].get_last_bar())
 
                 # >>>>>>>>>>>>>>>>>>>>>>>>>>
                 # Capture important data here
