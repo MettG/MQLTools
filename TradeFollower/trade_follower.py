@@ -10,6 +10,8 @@ from collections import deque
 from enum import Enum
 from virtual_stop import manage_virtual, update_virtual, VirtualManager
 from zones import ZoneManager
+from position import *
+from entry import *
 # from . import virtual_stop
 # always returns "OK"
 # pyautogui.confirm('Asks OK or Cancel')  # returns "OK" or "Cancel"
@@ -123,7 +125,6 @@ def calculate_atr(true_range,period):
 # Holds all the data necessary for open positions
 data_keepers = {}
 
-
 class ColumnQueue:
     """
         Holds all keys as column names
@@ -164,7 +165,6 @@ class ColumnQueue:
             columns=list(self.columns[1:]),
             index=[pd.to_datetime(x[0], unit='s') for x in self.data]
             )
-
 
 class DataKeep:
     """
@@ -280,116 +280,6 @@ def data_ready(curr_time, symbols):
     except:
         print("[WARNING] Error occurred updating data keepers.")
     
-
-# ===============
-# Order Entry Methods
-# ===============
-
-def get_lots(rate, balance, leverage, risk, stop_pips, isJPY= True, trades =2):
-        """
-        rate is CounterCurrency / AccountCurrency
-        Change mult to 10 if a JPY pair
-        """
-        max_lev = balance * leverage / 100000 / trades
-        mult=1 if not isJPY else 100
-        cash_risk = risk if risk >= 1 else balance * risk
-        cash_risk /= trades
-        per_pip = cash_risk / stop_pips
-        size = per_pip * rate * mult
-        size = 0.01 if size < 0.01 else size
-        size = max_lev - 0.01 if size >= max_lev else size
-        print(f"[ORDER] max_lev calculated: {max_lev} of {balance} {leverage}")
-        print(f"[ORDER] size calculated: {size}")
-        return round(size,2)
-
-def confirm_result(result):
-    try:
-        if not result:
-            raise Exception("[CRITICAL] No result when sending order.")
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"[CRITICAL] {result}")
-            raise Exception(result.retcode)
-        all_good = True
-    except Exception as e:
-        print(f"Error sending order request \n{e}")
-        all_good = False
-
-    return all_good
-
-def build_request(vol, symbol, oType, sl, tp, price = 0, comment="", action=mt5.TRADE_ACTION_DEAL, position=0):
-    digits = mt5.symbol_info(symbol).digits
-    tp = round(tp, digits)
-    sl = round(sl, digits)
-    price = mt5.symbol_info_tick(symbol).ask if oType > 0 else mt5.symbol_info_tick(symbol).bid
-    request = {
-        "action": action,
-        "symbol": symbol,
-        "volume": vol,
-        "type": oType,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "deviation": 7,
-        "magic": 0,
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_RETURN,
-    } 
-    if price != 0:
-        request['type_filling'] = mt5.ORDER_FILLING_IOC
-        del request['price']
-    if position != 0 : request['position'] = position
-    if comment != "" : request['comment'] = comment
-    print(request)  
-    # perform the check and display the result 'as is'
-    result = mt5.order_send(request)
-    return confirm_result(result)
-
-
-def enter_new_order(dir, symbol, risk, posType=PosType.TREND):
-    print(f"Begin enter new order {dir} on {symbol}")
-    # is percentage risk
-    # call balance and calculate
-    account_info = mt5.account_info()._asdict()
-    if account_info == None:
-        raise Exception(f"Error getting account info. {mt5.last_error()}")
-    else:
-        print(account_info)
-    # Get rate of exchange for symbol
-    if 'USD' in symbol:
-        arr = symbol.split("USD")
-        if arr[-1] == "":
-            rate = 1
-        else:
-            # 1 / last market price
-            rate = 1 / mt5.symbol_info(symbol).ask
-            
-    else:
-        counter = symbol[3:]
-        rate = mt5.symbol_info(counter+"USD")
-        if rate == None: rate = 1 / mt5.symbol_info("USD"+counter).ask
-        else: rate = rate.ask
-    # print(f"rate found {rate}")
-    # Get lots
-    if symbol not in data_keepers:
-        curr_time = datetime.utcnow()
-        data_keepers[symbol] = [ DataKeep(symbol, mt5.TIMEFRAME_H1, 21, curr_time), DataKeep(symbol, mt5.TIMEFRAME_M6, 56, curr_time) ]
-    dk = data_keepers[symbol]
-    dk[0].set_functions(atr=20)
-    ask = mt5.symbol_info(symbol).ask
-    bid = mt5.symbol_info(symbol).bid
-    dk[1].set_functions(hma=55, ema=8, std=20)
-    stop = dk[1].get_stop(dir,ask,bid, dk[0].atr,posType)
-    stop_pips = (ask - stop) / mt5.symbol_info(symbol).point if dir == 0 else (stop - bid) / mt5.symbol_info(symbol).point
-    lots = get_lots(rate,account_info['margin_free'] * .8,account_info['leverage'],risk,stop_pips,"JPY" in symbol)
-    take = ask + dk[0].atr if dir == 0 else ask - dk[0].atr
-    comment = "" if posType == PosType.TREND else "mean"
-    if not build_request(lots,symbol,dir,stop,take, comment=comment):
-        print("Order # 1 not placed.")
-    else:
-        time.sleep(2)
-        if not build_request(lots,symbol,dir,stop,0.0, comment=comment):
-            print("Order # 2 not placed.")
-
 # ==========
 # Processor functions
 # ===========
@@ -399,7 +289,6 @@ def com_function(conn):
     com_raw = pyautogui.prompt('Enter Command\n\n[ -b -s :SYMBOL_CHARS ]\n[ -r # ]\n[ -a (str,# ]')  # returns string or None
     conn.send(com_raw)
     time.sleep(1.5)
-
 
 # Add a parse for zone entry
 
@@ -469,296 +358,14 @@ def handler(conn, acc_manager: AccountManager):
             print(f"New Order detected on {symbol}")
             try:
                 acc_manager.relog()
+                data_ready(datetime.utcnow(), [symbol])
                 enter_new_order(oType, symbol, risk, posType)
             except Exception as e:
                 print(f"Position failed to enter.\r\n{e}")
         else:
             print("No order command detected.")
 
-# =================
-# Log Functions
-# ================
-
-class Log:
-    """
-        Takes care of all logging, takes a list of args, to be displayed in order
-    """
-    def __init__(self, *args):
-        """
-        First argument is the message, second is the symbol, the rest are relevant information
-        """
-        utc_from = datetime.utcnow()
-        s = args[0]
-        sym = args[1]
-        val = f"{utc_from}: {s} \n{args[2:]}"
-        print(val)
-        with open(f'/logs/{sym}_log.txt', 'a') as f:
-            f.write("\r\n")
-            f.write(val)
-            f.write("\r\n")
         
-
-# =================
-# Position Functions
-# ================
-
-def get_positions(positions):
-    """
-    Convert tuple of postions to panda dataframe
-    """
-    # display these positions as a table using pandas.DataFrame
-    df=pd.DataFrame(list(positions),columns=positions[0]._asdict().keys())
-    df['time'] = pd.to_datetime(df['time'], unit='s')
-    df.drop(['time_update', 'time_msc', 'time_update_msc', 'external_id'], axis=1, inplace=True)
-    return df
-
-def update_mean_position(oType, symbol, tickets, vol, open, hma, std, last_bar):
-    """
-    Update mean reversion position
-    When price hits opposite band, stop is placed at low/high
-    When price closes beyond mean, move stop loss to max dist of mean +/- spread or open +/- 2 * spread
-    """
-    ask = mt5.symbol_info(symbol).ask
-    bid = mt5.symbol_info(symbol).bid
-    spread = ask - bid
-    isUpdate = False
-    if oType == 0:
-        if last_bar['high'] >= hma + std:
-            print("[POSITION] Mean position target hit.")
-            Log("[POSITION] Mean position target hit.", symbol, oType, last_bar['low'], f'mean: {hma} upper: {hma+std}')
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,last_bar['low'])
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, last_bar['low'])
-            isUpdate = True
-        elif last_bar['close'] > hma:
-            print("[POSITION] Mean position in profit")
-            stop = open + 2 * spread
-            if hma - spread > stop : stop = hma - spread
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, stop)
-            isUpdate = True
-    else:
-        if last_bar['low'] <= hma - std:
-            print("[POSITION] Mean position target hit.")
-            Log("[POSITION] Mean position target hit.", symbol, oType, last_bar['high'], f'mean: {hma} lower: {hma-std}')
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,last_bar['high'])
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, last_bar['high'])
-            isUpdate = True
-        elif last_bar['close'] < hma:
-            print("[POSITION] Mean position in profit")
-            stop = open - 2 * spread
-            if hma + spread < stop : stop = hma + spread
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, stop)
-            isUpdate = True
-    if isUpdate: print("[POSITION] Mean reversion position updated.")
-
-def update_trend_position(oType, symbol, tickets, stop, open, atr60, hma, std, last_bar):
-    """
-    Manage an open trend position,
-    Trail price at band when on the positive side of the mean, else at .3 atr60 above/below band
-    or price +/- atr15 if price is >= 2*atr15 away from mean
-    Move price to break even if price is away from hma by 1 atr60
-    """
-    ask = mt5.symbol_info(symbol).ask
-    bid = mt5.symbol_info(symbol).bid
-    spread = ask - bid
-    isUpdate = False
-
-    if oType == 0:
-        if ask >= hma + atr60 + std:
-            # Price is far in profit
-            print("[POSITION] Trend Position deep in profit.")
-            new_stop = bid - atr60
-            if new_stop < open + std or new_stop <= stop:
-                print("[POSITION] Trend Buy Position not far enough in profit for stop update.")
-                return
-            Log("[TREND POSITION] Price is very far away from mean, updating stop to in profit.", symbol, open, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,new_stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
-            isUpdate = True
-        elif ask - hma >= atr60:
-            print("[POSITION] Trend Position, break even triggered as price is far from mean.")
-            Log("[TREND POSITION] Break even triggered.", symbol, open, f"{stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,open + 2 * spread)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, open + 2 * spread)
-            isUpdate = True
-        elif ask > hma:
-            print("[POSITION] Trend Postion, price is on positive side of mean.")
-            stop_ok = True
-            new_stop = hma - std
-            reason = "Trailing Profitable move."
-            if new_stop < open + std or new_stop <= stop:
-                # Trail stop not applicable, test for break even if reversal bar
-                o = last_bar['open']
-                c = last_bar['close']
-                l = last_bar['low']
-                h = last_bar['high']
-                new_stop = open + .2 * atr60
-                if open - bid >= std and ( (o < c and o-l >= .4 * (h-l) and h - c < o - l) or (o > c and c - l >= .4 * (h-l) and h - o < c - l) ) and new_stop > stop:
-                    print("[POSITION] Trend Postion, reversal bar detected, break even triggered.")
-                    reason = "Emergency Break Even triggered."
-                else:
-                    stop_ok = False
-            if not stop_ok:
-                print("[POSITION] Trend Sell Position conditions not met for profit trail or emergency break even.")
-                return
-            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, reason, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,new_stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
-            isUpdate = True
-        else:
-            print("[POSITION] Trend Position, price is on negative side of mean.")
-            new_stop = hma - std - .3 * atr60
-            if new_stop <= stop or new_stop <= open:
-                print("[POSITION] Trend Buy Position not far enough in profit for stop update.")
-                return
-            Log("[TREND POSITION] Price is on negative side of mean.", symbol, open, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol, new_stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
-            isUpdate = True
-    else:
-        if bid <= hma - atr60 -std:
-            # Price is far in profit
-            print("[POSITION] Trend Position deep in profit.")
-            new_stop = ask + atr60
-            if new_stop > open - std or new_stop >= stop:
-                print("[POSITION] Trend Sell Position not far enough in profit for stop update.")
-                return
-            Log("[TREND POSITION] Price is very far away from mean, updating stop to in profit.", symbol, open, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,new_stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
-            isUpdate = True
-        elif hma - bid >= atr60:
-            print("[POSITION] Trend Position, break even triggered as price is far from mean.")
-            Log("[TREND POSITION] Moving stop to break even.", symbol, open, f"{stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,open - 2 * spread)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, open - 2 * spread)
-            isUpdate = True
-        elif bid < hma:
-            print("[POSITION] Trend Postion, price is on positive side of mean.")
-            stop_ok = True
-            new_stop = hma + std
-            reason = "Trailing Profitable move."
-            if new_stop > open - std or new_stop >= stop:
-                # Trail stop not applicable, test for break even if reversal bar
-                o = last_bar['open']
-                c = last_bar['close']
-                l = last_bar['low']
-                h = last_bar['high']
-                new_stop = open - .2 * atr60
-                if open - bid >= std and ( (o < c and h - c >= .4 * (h-l) and o - l < h - c) or (o > c and h - o >= .4 * (h-l) and c - l < h - o) ) and new_stop < stop:
-                    print("[POSITION] Trend Postion, reversal bar detected, break even triggered.")
-                    reason = "Emergency Break Even triggered."
-                else:
-                    stop_ok = False
-            if not stop_ok:
-                print("[POSITION] Trend Sell Position conditions not met for profit trail or emergency break even.")
-                return
-            Log("[TREND POSITION] Price is on positive side of mean.", symbol, open, reason, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol,hma + std)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, hma + std)
-            isUpdate = True
-        else:
-            print("[POSITION] Trend Position, price is on negative side of mean.")
-            new_stop = hma + std + .3 * atr60
-            if new_stop >= stop or new_stop >= open:
-                print("[POSITION] Trend Sell Position not far enough in profit for stop update.")
-                return
-            Log("[TREND POSITION] Price is on negative side of mean.", symbol, open, f"{stop} -> {new_stop}")
-            manage_virtual(manager,int(tickets.iloc[0]), oType, symbol, new_stop)
-            if len(tickets) > 1:
-                manage_virtual(manager,int(tickets.iloc[1]), oType, symbol, new_stop)
-            isUpdate = True
-
-    if isUpdate: print("[POSITION] Trend position updating successfully.")
-
-    
-def update_runner_position(oType, symbol, ticket, vol, open, trail_dist, hma):
-    """
-        Update runner type of positions,
-        Follows hma by .25 atr
-        close when price closes over HMA
-    """
-    print(f"[MANAGER] Runner Position to update:\r\n{ticket}:{mt5.positions_get(ticket=ticket)}")
-    isUpdate = True
-    if oType == 0:
-        price = mt5.symbol_info_tick(symbol).ask
-        if price < hma:
-            # close_res = build_request(vol,symbol,1,0.0,0.0,price=open,action=mt5.TRADE_ACTION_DEAL,position=ticket)
-            close_res = mt5.Close(symbol, ticket=ticket)
-            if not close_res:
-                Log("[Critical] Error when closing runner", symbol, oType, price, f'mean:{hma}')
-                isUpdate = False
-                
-            else:
-                print("[POSITION] Buy runner closed.")
-        else:
-            new_stop = hma - trail_dist if hma - trail_dist > open + trail_dist else open + trail_dist
-            update_res = build_request(vol,symbol,1,new_stop,0.0, action=mt5.TRADE_ACTION_SLTP, position=ticket, comment="runner")
-            if not update_res:
-                Log("[Critical] Error when updating runner", symbol, oType, new_stop, f'mean:{hma}', f'newstop:{new_stop}')
-                isUpdate = False
-                # Add Virtual Stop
-                manage_virtual(manager,ticket,oType,symbol,new_stop)
-            else:
-                print("[POSITION] Buy runner updated.")
-    else:
-        price = mt5.symbol_info_tick(symbol).bid
-        if price < hma:
-            # close_res = build_request(vol,symbol,0,0.0,0.0,price=open,action=mt5.TRADE_ACTION_DEAL,position=ticket)
-            close_res = mt5.Close(symbol, ticket=ticket)
-            if not close_res:
-                Log("[Critical] Error when closing runner", symbol, oType, price, f'mean:{hma}')
-                isUpdate = False
-            else:
-                print("[POSITION] Sell runner closed.")
-        else:
-            new_stop = hma +trail_dist if hma + trail_dist < open - trail_dist else open - trail_dist
-            update_res = build_request(vol,symbol,0,new_stop,0.0,action=mt5.TRADE_ACTION_SLTP, position=ticket, comment="runner")
-            if not update_res:
-                Log("[Critical] Error when updating runner", symbol, oType, price, f'mean:{hma}', f'newstop:{new_stop}')
-                isUpdate = False
-                # Add Virtual Stop
-                manage_virtual(manager,ticket,oType,symbol,new_stop)
-            else:
-                print("[POSITION] Sell runner updated.")
-    
-    if isUpdate: print("[POSITION] Runner updated or closed successfully.")
-
-
-def set_profit_position(vol, symbol, oType, ticket_to_close, ticket_to_even, break_dist):
-    price = mt5.symbol_info_tick(symbol).ask if oType > 0 else mt5.symbol_info_tick(symbol).bid
-    sl = price + break_dist if oType > 0 else price - break_dist
-    closeType = 0 if oType > 0 else 1
-    close_res = build_request(vol,symbol,closeType,0,0,action=mt5.TRADE_ACTION_DEAL,position=ticket_to_close)
-    even_res = build_request(vol,symbol,oType,sl,0,action=mt5.TRADE_ACTION_SLTP, position=ticket_to_even, comment="runner")
-    isError = False
-    if not close_res:
-        Log("[CRITICAL] Error when closing for 1st profit", symbol, oType, price)
-        isError = True
-    if not even_res:
-        Log("[CRITICAL] Error when updating break even", symbol, oType, price)
-        isError = True
-    if not isError: print("[POSITION] Position successfull set to profit type.")
- 
-
-def extract_symbols(positions):
-    arr = []
-    for sym in positions['symbol']:
-        if sym not in arr: arr.append(sym)
-    return arr
-
 # ================
 # Main Loop
 # ================
@@ -793,7 +400,7 @@ if __name__ == "__main__":
             virtual_count += 1
             time.sleep(1)
             if virtual_count % 30 == 0:
-                print(f"open positions: {pos_symbols}")
+                print(f"open positions: {symbols_to_load}")
                 update_virtual(manager)
             if virtual_count > 300: virtual_count = 0
         else:
@@ -828,7 +435,12 @@ if __name__ == "__main__":
             dk[1].set_functions(hma=55, ema=8, atr=20, std=20)
             # Grab symbol info
             # print(pos_df.head(3))
-  
+
+            # Update zone
+            if zone_manager.update(sym,dk[1].get_bars(7),dk[1].atr):
+                # Entry signaled
+
+
             sym_pos = pos_df.loc[pos_df['symbol'] == sym]
             print(sym_pos)
             tickets = sym_pos['ticket']

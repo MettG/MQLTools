@@ -61,5 +61,6 @@ class VirtualManager:
                     print(f"[VIRTUAL STOP] Position {stop} no longer exists.")
                     del stop
                     
-
+def manage_virtual(vm:VirtualManager, ticket, order_type, symbol, price):
+    vm.add(ticket,order_type,symbol,price)
     

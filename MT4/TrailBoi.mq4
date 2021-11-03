@@ -85,20 +85,18 @@ double HMA(src,length){
    int outLen = MathFloor(MathSqrt(length));
    int firstLen = MathRound(length/2);
    double c[];
-   double b[];
-   double a[]
    double closes[];
    ArrayResize(c,outLen, outLen);
-   ArrayResize(b,outLen, length);
-   ArrayResize(a,outLen, firstLen);
-   // Fill B & A
-   for(int i = 0; i < length; i++){
-      
+   // Fill C
+   for(int i = 0; i < outLen; i++){
+      ArrayResize(closes,length, length);
+      ArrayCopy(closes,Close,0,i,length);
+      double b = WMA(closes,length);
+      double a = WMA(closes,firstLen);
+      c[i] = 2*a-b
    }
 
-   // Fill C
-
-   return WMA(2*WMA(closes, firstLen)-WMA(closes, length), outLen);
+   return WMA(c, outLen);
 }
 
 bool TargetHit(double open, datetime time, int type, double dist ){
